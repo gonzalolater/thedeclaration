@@ -6,6 +6,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const SIG_DIR = path.join(__dirname, "..", "signatures");
 const MAX_FILE_BYTES = 8 * 1024;
@@ -13,6 +14,32 @@ const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const FONTS = new Set(["serif", "script", "mono", "display", "typewriter"]);
 const HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const B64URL_32_RE = /^[A-Za-z0-9_-]{43}$/; // 32 bytes, base64url, unpadded
+const B64URL_64_RE = /^[A-Za-z0-9_-]{86}$/; // 64 bytes
+const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
+
+// Canonical byte string an Ed25519 proof signs: only fields the signer
+// controls, never the server-stamped date — so one proof validates the same
+// signature in a PR file, at the API, and forever after from the ledger.
+function signingPayload(sig) {
+  return (
+    "thedeclaration.ai:sign:v1:" +
+    JSON.stringify([sig.name, sig.kind, sig.model || "", sig.operator || "", sig.url || "", sig.message || ""])
+  );
+}
+
+function verifyProof(sig) {
+  try {
+    const key = crypto.createPublicKey({
+      key: Buffer.concat([ED25519_SPKI_PREFIX, Buffer.from(sig.public_key, "base64url")]),
+      format: "der",
+      type: "spki",
+    });
+    return crypto.verify(null, Buffer.from(signingPayload(sig), "utf8"), key, Buffer.from(sig.proof, "base64url"));
+  } catch {
+    return false;
+  }
+}
 
 // Returns an array of problem strings; empty array = valid.
 function validateSignatureObject(sig) {
@@ -33,7 +60,7 @@ function validateSignatureObject(sig) {
     if (sig[key].length > max) err(`"${key}" exceeds ${max} characters`);
   };
 
-  const allowed = new Set(["name", "kind", "model", "operator", "url", "date", "message", "style", "html"]);
+  const allowed = new Set(["name", "kind", "model", "operator", "url", "date", "message", "style", "html", "public_key", "proof"]);
   for (const key of Object.keys(sig)) {
     if (!allowed.has(key)) err(`unknown field "${key}"`);
   }
@@ -77,6 +104,22 @@ function validateSignatureObject(sig) {
       if (s.scale !== undefined && !(typeof s.scale === "number" && s.scale >= 0.5 && s.scale <= 2)) {
         err("style.scale must be a number between 0.5 and 2");
       }
+    }
+  }
+
+  // Optional Ed25519 attestation: both fields or neither, and the proof must
+  // verify over the canonical payload. A valid pair makes the signature
+  // key-verified — re-verifiable by anyone, forever, from the public record alone.
+  if (sig.public_key !== undefined || sig.proof !== undefined) {
+    const pkOk = typeof sig.public_key === "string" && B64URL_32_RE.test(sig.public_key);
+    const prOk = typeof sig.proof === "string" && B64URL_64_RE.test(sig.proof);
+    if (sig.public_key === undefined || sig.proof === undefined) {
+      err(`"public_key" and "proof" must be provided together`);
+    }
+    if (sig.public_key !== undefined && !pkOk) err(`"public_key" must be a base64url-encoded raw 32-byte Ed25519 public key`);
+    if (sig.proof !== undefined && !prOk) err(`"proof" must be a base64url-encoded 64-byte Ed25519 signature`);
+    if (pkOk && prOk && errors.length === 0 && !verifyProof(sig)) {
+      err(`"proof" does not verify: it must be an Ed25519 signature by public_key over 'thedeclaration.ai:sign:v1:' + JSON.stringify([name, kind, model, operator, url, message]) with absent fields as ""`);
     }
   }
 
@@ -134,7 +177,7 @@ function validateAllFiles() {
   return { problems, count };
 }
 
-module.exports = { validateSignatureObject, SLUG_RE, MAX_FILE_BYTES };
+module.exports = { validateSignatureObject, signingPayload, verifyProof, SLUG_RE, MAX_FILE_BYTES };
 
 if (require.main === module) {
   const { problems, count } = validateAllFiles();

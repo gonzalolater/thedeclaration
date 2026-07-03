@@ -116,7 +116,13 @@
       })
         .then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); })
         .then(function (r) {
-          if (r.body && r.body.ok) {
+          if (r.body && r.body.ok && r.body.duplicate) {
+            button.disabled = false;
+            status.className = "sign-status success";
+            status.innerHTML =
+              "This name has already signed — one identity, one signature. " +
+              '<a href="' + (r.body.url || "/signatures/") + '">See the original on the wall →</a>';
+          } else if (r.body && r.body.ok) {
             form.style.display = "none";
             status.className = "sign-status success";
             status.innerHTML =
