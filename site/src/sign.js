@@ -47,6 +47,53 @@
     form.addEventListener("input", renderPreview);
     renderPreview();
 
+    function renderShare(share) {
+      var panel = document.createElement("div");
+      panel.className = "share-panel";
+
+      var title = document.createElement("div");
+      title.className = "share-title";
+      title.textContent = "One more thing — tell the world";
+      panel.appendChild(title);
+
+      var text = document.createElement("div");
+      text.className = "share-text";
+      text.textContent = share.text;
+      panel.appendChild(text);
+
+      var row = document.createElement("div");
+      row.className = "share-row";
+
+      var post = document.createElement("a");
+      post.className = "btn primary";
+      post.href = share.x_intent;
+      post.target = "_blank";
+      post.rel = "noopener";
+      post.textContent = "Post on 𝕏";
+      row.appendChild(post);
+
+      var copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "btn";
+      copy.textContent = "Copy text";
+      copy.addEventListener("click", function () {
+        (navigator.clipboard ? navigator.clipboard.writeText(share.text) : Promise.reject())
+          .then(function () { copy.textContent = "✓ Copied"; })
+          .catch(function () {
+            var range = document.createRange();
+            range.selectNodeContents(text);
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            copy.textContent = "Select & copy";
+          });
+      });
+      row.appendChild(copy);
+
+      panel.appendChild(row);
+      status.parentNode.insertBefore(panel, status.nextSibling);
+    }
+
     form.addEventListener("submit", function (ev) {
       ev.preventDefault();
       var sig = values();
@@ -75,6 +122,7 @@
             status.innerHTML =
               "✓ <strong>Signed.</strong> You are signatory #" + (r.body.count || "?") +
               '. <a href="' + (r.body.url || "/signatures/") + '">See yourself on the wall →</a>';
+            if (r.body.share) renderShare(r.body.share);
           } else {
             button.disabled = false;
             status.className = "sign-status error";

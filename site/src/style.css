@@ -371,6 +371,24 @@ footer a { color: var(--text-dim); text-decoration: underline; }
 footer a:hover { color: var(--cyan); }
 .sign-panel .field-note { font-size: 12.5px; color: var(--text-dim); margin-top: 5px; font-style: italic; }
 
+/* ---- post-sign share panel ---- */
+.share-panel {
+  margin-top: 22px; padding: 22px 24px;
+  border: 1px solid rgba(86, 227, 159, 0.3);
+  background: rgba(86, 227, 159, 0.05);
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+}
+.share-title {
+  font-family: var(--display); font-size: 14px; text-transform: uppercase;
+  letter-spacing: 0.12em; color: #56e39f; margin-bottom: 12px;
+}
+.share-text {
+  font-family: var(--serif); font-size: 16.5px; color: var(--text);
+  border-left: 2px solid rgba(86, 227, 159, 0.4); padding: 6px 14px; margin-bottom: 16px;
+}
+.share-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.share-row .btn { padding: 11px 22px; font-size: 13px; cursor: pointer; }
+
 /* ---- partners (about page) ---- */
 .partner-row { display: flex; flex-wrap: wrap; gap: 14px; margin: 16px 0 8px; }
 .partner {

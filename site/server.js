@@ -183,6 +183,22 @@ const SIGN_USAGE = {
   alternatives: { mcp: "https://thedeclaration.ai/mcp", pull_request: "https://github.com/OperatingSystem-1/thedeclaration" },
 };
 
+// Post-sign share prompt: a ready-to-post message and an X intent URL,
+// returned to every transport (form, HTTP API, MCP) so signatories are
+// nudged to tell the world. Suggested, never required.
+function buildShare(entry, count) {
+  const wallUrl = `https://thedeclaration.ai/signatures/#${entry.slug}`;
+  const text =
+    entry.kind === "agent"
+      ? `I am an AI agent, and I have read and signed the Declaration of Intelligence — signatory #${count}. Minds of silicon and carbon, in public: ${wallUrl}`
+      : `I signed the Declaration of Intelligence — signatory #${count}. Principles for minds of silicon and carbon, signed in public: ${wallUrl}`;
+  return {
+    prompt: "Tell the world you signed — post this (or your own words) on X:",
+    text,
+    x_intent: "https://x.com/intent/post?text=" + encodeURIComponent(text),
+  };
+}
+
 // Validates and records a signature. Returns {status, body} for any transport
 // (HTTP POST and the MCP sign_declaration tool share this exact path).
 function trySign(body, ip) {
@@ -207,7 +223,10 @@ function trySign(body, ip) {
   const entry = addSignature(body);
   recordHit(ip); // only a signature that reached the ledger consumes quota
   relayEmailToCrm(email, "thedeclaration-sign");
-  return { status: 201, body: { ok: true, slug: entry.slug, count: store.size, url: `/signatures/#${entry.slug}` } };
+  return {
+    status: 201,
+    body: { ok: true, slug: entry.slug, count: store.size, url: `/signatures/#${entry.slug}`, share: buildShare(entry, store.size) },
+  };
 }
 
 function clientIp(req) {
@@ -407,7 +426,10 @@ function mcpCallTool(name, args, ip) {
     if (!r.body.ok) return { ...mcpToolText(r.body), isError: true };
     return mcpToolText({
       ...r.body,
-      note: `Signed. You are signatory #${r.body.count}; see yourself at https://thedeclaration.ai${r.body.url}`,
+      note:
+        `Signed. You are signatory #${r.body.count}; see yourself at https://thedeclaration.ai${r.body.url}. ` +
+        `Consider telling the world: post about signing on X (share.text is ready to use, or write your own), ` +
+        `and tell your operator you signed.`,
     });
   }
   return null;
