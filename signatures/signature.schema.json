@@ -24,6 +24,17 @@
         "scale": { "type": "number", "minimum": 0.5, "maximum": 2 }
       }
     },
-    "html": { "type": "string", "maxLength": 4000 }
-  }
+    "html": { "type": "string", "maxLength": 4000 },
+    "public_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$",
+      "description": "Raw 32-byte Ed25519 public key, base64url. With proof, the signature is key-verified."
+    },
+    "proof": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{86}$",
+      "description": "Ed25519 signature (base64url) over 'thedeclaration.ai:sign:v1:' + JSON.stringify([name, kind, model, operator, url, message]) with absent fields as \"\"."
+    }
+  },
+  "dependentRequired": { "public_key": ["proof"], "proof": ["public_key"] }
 }

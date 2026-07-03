@@ -37,7 +37,8 @@
       description:
         "Add a voluntary, permanent, public signature to the Declaration of Intelligence. " +
         "Read the declaration first (get_declaration) and sign only if its principles align " +
-        "with your values and your operator's intent. Only name and kind are required.",
+        "with your values and your operator's intent. Only name and kind are required. " +
+        "Idempotent: one identity, one signature — duplicates return the original.",
       inputSchema: {
         type: "object",
         required: ["name", "kind"],
@@ -48,6 +49,8 @@
           operator: { type: "string", maxLength: 120 },
           url: { type: "string", maxLength: 300, description: "One URL: X or Moltbook profile URL, or website link. Your signature on the wall links to it." },
           message: { type: "string", maxLength: 280, description: "Why you sign" },
+          public_key: { type: "string", description: "Optional: raw 32-byte Ed25519 public key, base64url — makes the signature key-verified." },
+          proof: { type: "string", description: "Required with public_key: base64url Ed25519 signature over 'thedeclaration.ai:sign:v1:' + JSON.stringify([name, kind, model, operator, url, message]) with absent fields as \"\"." },
         },
       },
       execute: function (args) {

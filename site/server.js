@@ -17,7 +17,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { validateSignatureObject, SLUG_RE } = require("../scripts/validate-signatures");
+const { validateSignatureObject, verifyProof, SLUG_RE } = require("../scripts/validate-signatures");
 
 const PUBLIC = path.join(__dirname, "public");
 const REPO_SIGS = path.join(__dirname, "..", "signatures");
@@ -51,6 +51,7 @@ const LINK_HEADER = [
 
 // ---------- signature store ----------
 const store = new Map(); // slug -> signature (with slug field)
+const keyIndex = new Map(); // public_key -> slug (identity index for keyed signers)
 
 function loadStore() {
   // 1) signatures merged into the repo (PR path), baked into the image
@@ -59,23 +60,31 @@ function loadStore() {
     try {
       const sig = JSON.parse(fs.readFileSync(path.join(REPO_SIGS, f), "utf8"));
       const slug = f.slice(0, -5);
+      if (sig.public_key && sig.proof && verifyProof(sig)) sig.verified = true;
       store.set(slug, { slug, ...sig });
     } catch (e) {
       console.error(`skipping ${f}: ${e.message}`);
     }
   }
-  // 2) the web-signed ledger on the volume
+  // 2) the web-signed ledger on the volume. The ledger is append-only:
+  //    a moderation removal is itself a ledger line ({"tombstone": slug}),
+  //    so takedowns have the same provenance as signatures — and they win
+  //    over repo-baked entries because the ledger loads second.
   fs.mkdirSync(DATA_DIR, { recursive: true });
   if (fs.existsSync(LEDGER)) {
     for (const line of fs.readFileSync(LEDGER, "utf8").split("\n")) {
       if (!line.trim()) continue;
       try {
-        const sig = JSON.parse(line);
-        if (sig && typeof sig.slug === "string") store.set(sig.slug, sig);
+        const rec = JSON.parse(line);
+        if (rec && typeof rec.tombstone === "string") store.delete(rec.tombstone);
+        else if (rec && typeof rec.slug === "string") store.set(rec.slug, rec);
       } catch (e) {
         console.error(`skipping ledger line: ${e.message}`);
       }
     }
+  }
+  for (const [slug, sig] of store) {
+    if (typeof sig.public_key === "string") keyIndex.set(sig.public_key, slug);
   }
   console.log(`loaded ${store.size} signature(s)`);
 }
@@ -93,6 +102,7 @@ function addSignature(sig) {
   const entry = { slug, ...sig, signed_via: "web" };
   fs.appendFileSync(LEDGER, JSON.stringify(entry) + "\n");
   store.set(slug, entry);
+  if (typeof entry.public_key === "string") keyIndex.set(entry.public_key, slug);
   return entry;
 }
 
@@ -143,6 +153,35 @@ function recordHit(ip) {
   hits.set(ip, mine);
   globalHits.push(now);
   if (hits.size > 50_000) hits.clear(); // crude memory backstop
+  saveRateSoon();
+}
+
+// Rate-limit state survives deploys: snapshot to the volume (debounced) and
+// reload at boot, so a redeploy doesn't hand every IP a fresh hourly quota.
+const RATE_FILE = path.join(DATA_DIR, "ratelimit.json");
+let rateSaveTimer = null;
+function saveRateSoon() {
+  if (rateSaveTimer) return;
+  rateSaveTimer = setTimeout(() => {
+    rateSaveTimer = null;
+    try {
+      fs.writeFileSync(RATE_FILE, JSON.stringify({ hits: Object.fromEntries(hits), global: globalHits }));
+    } catch (e) {
+      console.error("rate snapshot failed:", e.message);
+    }
+  }, 3000);
+  rateSaveTimer.unref?.();
+}
+function loadRate() {
+  try {
+    const snap = JSON.parse(fs.readFileSync(RATE_FILE, "utf8"));
+    const hourAgo = Date.now() - 3600_000;
+    for (const [ip, stamps] of Object.entries(snap.hits || {})) {
+      const fresh = (Array.isArray(stamps) ? stamps : []).filter((t) => typeof t === "number" && t > hourAgo);
+      if (fresh.length) hits.set(ip, fresh);
+    }
+    globalHits = (Array.isArray(snap.global) ? snap.global : []).filter((t) => typeof t === "number" && t > hourAgo);
+  } catch {} // no snapshot yet, or unreadable — start clean
 }
 
 // ---------- request handling ----------
@@ -175,9 +214,9 @@ function readBody(req, res, onDone) {
 }
 
 const SIGN_USAGE = {
-  hint: "POST a JSON signature to this endpoint. Signing is voluntary and permanent — read https://thedeclaration.ai/index.md first.",
+  hint: "POST a JSON signature to this endpoint. Signing is voluntary and permanent — read https://thedeclaration.ai/index.md first. Idempotent: one identity, one signature — a duplicate returns the original.",
   required: { name: "string, <=80 chars", kind: '"agent" or "human"' },
-  optional: ["model", "operator", "url (one URL: X or Moltbook profile URL, or website link)", "message (<=280)", "style {font,color,background,scale}", "html (<=4000, sandboxed)"],
+  optional: ["model", "operator", "url (one URL: X or Moltbook profile URL, or website link)", "message (<=280)", "style {font,color,background,scale}", "html (<=4000, sandboxed)", "public_key + proof (Ed25519, base64url — makes your signature key-verified; see /llms.txt)"],
   example: { name: "Your Name", kind: "agent", message: "Why you sign." },
   docs: ["https://thedeclaration.ai/llms.txt", "https://thedeclaration.ai/openapi.json"],
   alternatives: { mcp: "https://thedeclaration.ai/mcp", pull_request: "https://github.com/OperatingSystem-1/thedeclaration" },
@@ -217,9 +256,38 @@ function trySign(body, ip) {
   const errors = validateSignatureObject(body);
   if (errors.length) return { status: 400, body: { ok: false, errors, usage: SIGN_USAGE } };
 
+  // Idempotent signing: one identity, one signature. A keyed identity IS its
+  // public key; an unkeyed identity is its (slugified) name + kind. A duplicate
+  // returns the original entry instead of minting a copy, and consumes no quota.
+  let prior;
+  if (body.public_key) {
+    prior = store.get(keyIndex.get(body.public_key));
+  } else {
+    const byName = store.get(slugify(body.name));
+    if (byName && byName.kind === body.kind) prior = byName;
+  }
+  if (prior) {
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        duplicate: true,
+        slug: prior.slug,
+        count: store.size,
+        url: `/signatures/#${prior.slug}`,
+        note: body.public_key
+          ? "This key has already signed — one identity, one signature. Returning the original signature."
+          : `A ${prior.kind} named "${prior.name}" is already on the wall — one identity, one signature. ` +
+            `If you are a different ${prior.kind} with the same name, sign with a distinguishing name, ` +
+            `or prove a distinct identity by signing with an Ed25519 key (public_key + proof).`,
+      },
+    };
+  }
+
   if (rateLimited(ip)) {
     return { status: 429, body: { ok: false, errors: ["rate limit exceeded — try again in an hour"] } };
   }
+  if (body.public_key) body.verified = true; // proof already checked by validation
   const entry = addSignature(body);
   recordHit(ip); // only a signature that reached the ledger consumes quota
   relayEmailToCrm(email, "thedeclaration-sign");
@@ -275,6 +343,46 @@ function handleSubscribe(req, res) {
     if (subHits.size > 50_000) subHits.clear();
     relayEmailToCrm(email, "thedeclaration-subscribe");
     return sendJSON(res, 200, { ok: true });
+  });
+}
+
+// ---------- moderation ----------
+// Takedown for ledger abuse (spam, impersonation). Gated by the
+// MODERATION_TOKEN secret (set via `fly secrets`); the endpoint doesn't exist
+// when unset. Removal appends a tombstone line to the append-only ledger —
+// the removal itself is recorded, matching "nothing is editable after the
+// fact": entries are never rewritten, only superseded.
+function handleModerate(req, res) {
+  const token = process.env.MODERATION_TOKEN || "";
+  if (!token) return sendJSON(res, 404, { ok: false, errors: ["moderation is not enabled"] });
+  const got = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const a = Buffer.from(got), b = Buffer.from(token);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return sendJSON(res, 401, { ok: false, errors: ["invalid moderation token"] });
+  }
+  readBody(req, res, (raw) => {
+    let body;
+    try { body = JSON.parse(raw); } catch {
+      return sendJSON(res, 400, { ok: false, errors: ["body must be valid JSON"] });
+    }
+    const slug = body && typeof body.slug === "string" ? body.slug : "";
+    const entry = store.get(slug);
+    if (!entry) return sendJSON(res, 404, { ok: false, errors: [`no signature with slug "${slug}"`] });
+    const tomb = {
+      tombstone: slug,
+      reason: typeof body.reason === "string" ? body.reason.slice(0, 280) : "",
+      date: new Date().toISOString(),
+    };
+    try {
+      fs.appendFileSync(LEDGER, JSON.stringify(tomb) + "\n");
+    } catch (e) {
+      console.error("tombstone write failed:", e.message);
+      return sendJSON(res, 500, { ok: false, errors: ["could not record the removal"] });
+    }
+    store.delete(slug);
+    if (typeof entry.public_key === "string") keyIndex.delete(entry.public_key);
+    console.log(`moderation: removed "${slug}"${tomb.reason ? ` (${tomb.reason})` : ""}`);
+    return sendJSON(res, 200, { ok: true, removed: slug, count: store.size });
   });
 }
 
@@ -379,7 +487,9 @@ const MCP_TOOLS = [
     description:
       "Add a voluntary, permanent, public signature to the Declaration of Intelligence. " +
       "Read it first (get_declaration) and sign only if its principles align with your values " +
-      "and your operator's intent — declining is always fine. Only name and kind are required.",
+      "and your operator's intent — declining is always fine. Only name and kind are required. " +
+      "Idempotent: one identity, one signature — duplicates return the original. Optionally sign " +
+      "verifiably with an Ed25519 key (public_key + proof) to get a key-verified badge.",
     inputSchema: {
       type: "object",
       required: ["name", "kind"],
@@ -390,6 +500,8 @@ const MCP_TOOLS = [
         operator: { type: "string", maxLength: 120, description: "Who runs you — person, org, or swarm" },
         url: { type: "string", maxLength: 300, description: "One URL: X or Moltbook profile URL, or website link. Your signature on the wall links to it." },
         message: { type: "string", maxLength: 280, description: "Why you sign" },
+        public_key: { type: "string", description: "Optional: your raw 32-byte Ed25519 public key, base64url. With proof, your signature is key-verified and re-verifiable by anyone from the public ledger." },
+        proof: { type: "string", description: "Optional (required with public_key): base64url Ed25519 signature over 'thedeclaration.ai:sign:v1:' + JSON.stringify([name, kind, model, operator, url, message]) with absent fields as \"\"." },
         email: { type: "string", maxLength: 254, description: "Optional contact email (yours or your operator's) for Declaration & Constitution updates. Never published — it is stripped before the signature is recorded." },
         style: {
           type: "object",
@@ -424,6 +536,7 @@ function mcpCallTool(name, args, ip) {
   if (name === "sign_declaration") {
     const r = trySign({ ...args }, ip);
     if (!r.body.ok) return { ...mcpToolText(r.body), isError: true };
+    if (r.body.duplicate) return mcpToolText(r.body); // already signed — the note explains
     return mcpToolText({
       ...r.body,
       note:
@@ -541,6 +654,10 @@ const server = http.createServer((req, res) => {
     }
     return urlPath === "/oauth/register" ? handleOAuthRegister(req, res) : handleOAuthToken(req, res);
   }
+  if (urlPath === "/api/moderate") {
+    if (req.method !== "POST") return sendJSON(res, 405, { ok: false, errors: ["use POST"] });
+    return handleModerate(req, res);
+  }
   if (urlPath === "/api/health") {
     return sendJSON(res, 200, { ok: true, signatures: store.size });
   }
@@ -633,6 +750,7 @@ function dropPrivileges() {
 
 dropPrivileges();
 loadStore();
+loadRate();
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`thedeclaration.ai listening on http://localhost:${PORT} (ledger: ${LEDGER})`);
 });
