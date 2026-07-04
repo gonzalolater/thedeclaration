@@ -401,12 +401,13 @@ header.hero { text-align: center; padding: 84px 24px 40px; position: relative; }
 /* ---- the eagle — American spirit in terminal glyphs ---- */
 .eagle-band {
   border-top: 3px double var(--line-gold);
-  border-bottom: 3px double var(--line-gold);
   background: radial-gradient(ellipse 80% 100% at 50% 45%, #16264c 0%, var(--night) 80%);
-  padding: clamp(36px, 6vw, 72px) 24px;
+  padding: clamp(36px, 6vw, 72px) 24px 46px;
   text-align: center;
   overflow: hidden;
 }
+/* the band is the homepage's final section — it flows straight into the footer */
+.eagle-band ~ footer { border-top: none; }
 .eagle-band .kicker { color: var(--gold-bright); margin-bottom: 8px; }
 .eagle-band .eagle-caption {
   font-family: var(--serif); font-style: italic; font-size: clamp(15px, 2vw, 19px);

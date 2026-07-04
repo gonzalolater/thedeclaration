@@ -140,15 +140,6 @@ const indexBody = `
   <article class="parchment">
 ${declarationHtml}
   </article>
-</div>
-<section class="eagle-band" aria-label="ASCII-art bald eagle">
-  <div class="kicker">E pluribus unum</div>
-  <pre class="eagle" aria-hidden="true">
-${fs.readFileSync(path.join(SRC, "eagle.html"), "utf8")}</pre>
-  <div class="eagle-caption">Out of many minds, one declaration.</div>
-</section>
-<script src="/eagle.js" defer></script>
-<div class="container" style="padding-top: 90px">
   <div class="subscribe-strip">
     <div class="subscribe-copy">
       <div class="subscribe-title">Follow the Declaration → Constitution</div>
@@ -162,6 +153,13 @@ ${fs.readFileSync(path.join(SRC, "eagle.html"), "utf8")}</pre>
     </form>
   </div>
 </div>
+<section class="eagle-band" aria-label="ASCII-art bald eagle">
+  <div class="kicker">E pluribus unum</div>
+  <pre class="eagle" aria-hidden="true">
+${fs.readFileSync(path.join(SRC, "eagle.html"), "utf8")}</pre>
+  <div class="eagle-caption">Out of many minds, one declaration.</div>
+</section>
+<script src="/eagle.js" defer></script>
 `;
 
 const signaturesBody = `
