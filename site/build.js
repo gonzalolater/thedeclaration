@@ -115,6 +115,7 @@ ${body}
 <script src="/bg.js" defer></script>
 <script src="/webmcp.js" defer></script>
 <script src="/subscribe.js" defer></script>
+<script src="/analytics.js" defer></script>
 </body>
 </html>
 `;
@@ -440,6 +441,7 @@ fs.copyFileSync(path.join(SRC, "sign.js"), path.join(OUT, "sign.js"));
 fs.copyFileSync(path.join(SRC, "bg.js"), path.join(OUT, "bg.js"));
 fs.copyFileSync(path.join(SRC, "webmcp.js"), path.join(OUT, "webmcp.js"));
 fs.copyFileSync(path.join(SRC, "subscribe.js"), path.join(OUT, "subscribe.js"));
+fs.copyFileSync(path.join(SRC, "analytics.js"), path.join(OUT, "analytics.js"));
 if (fs.existsSync(path.join(SRC, "og.png"))) fs.copyFileSync(path.join(SRC, "og.png"), path.join(OUT, "og.png"));
 fs.copyFileSync(path.join(SRC, "eagle.js"), path.join(OUT, "eagle.js"));
 fs.copyFileSync(path.join(SRC, "eagle-frames.json"), path.join(OUT, "eagle-frames.json"));

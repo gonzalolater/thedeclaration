@@ -14,6 +14,7 @@
 //   DATA_DIR   ledger directory (default /data)
 
 const http = require("http");
+const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
@@ -619,6 +620,31 @@ function handleMcp(req, res) {
   });
 }
 
+// ---------- PostHog first-party proxy ----------
+// The analytics snippet points at /ingest so events are same-origin (and
+// survive ad blockers). Static assets come from the assets CDN; everything
+// else goes to the ingestion host. Zero dependencies, streamed both ways.
+function handleIngest(req, res) {
+  const isStatic = req.url.startsWith("/ingest/static/");
+  const upstreamHost = isStatic ? "us-assets.i.posthog.com" : "us.i.posthog.com";
+  const headers = { ...req.headers, host: upstreamHost };
+  delete headers.connection;
+  headers["x-forwarded-for"] = clientIp(req); // keep geo-IP accurate behind the proxy
+  const up = https.request(
+    { hostname: upstreamHost, path: req.url.replace(/^\/ingest/, "") || "/", method: req.method, headers, timeout: 15000 },
+    (ur) => {
+      res.writeHead(ur.statusCode || 502, ur.headers);
+      ur.pipe(res);
+    }
+  );
+  up.on("timeout", () => up.destroy(new Error("upstream timeout")));
+  up.on("error", () => {
+    if (!res.headersSent) res.writeHead(502, { "content-type": "application/json" });
+    res.end('{"error":"ingest upstream unavailable"}');
+  });
+  req.pipe(up);
+}
+
 const server = http.createServer((req, res) => {
   const host = String(req.headers.host || "");
   if (host.toLowerCase().startsWith("www.")) {
@@ -668,6 +694,9 @@ const server = http.createServer((req, res) => {
   }
   if (urlPath === "/api/health") {
     return sendJSON(res, 200, { ok: true, signatures: store.size });
+  }
+  if (urlPath === "/ingest" || urlPath.startsWith("/ingest/")) {
+    return handleIngest(req, res);
   }
   if (urlPath === "/api/signatures.json") {
     res.writeHead(200, {
