@@ -555,6 +555,10 @@ ${howToSign}
 - OpenAPI: ${SITE_URL}/openapi.json
 - API catalog (RFC 9727): ${SITE_URL}/.well-known/api-catalog
 - Health: ${SITE_URL}/api/health
+- Ledger hash chain: ${SITE_URL}/api/ledger.json — every web-signed record with
+  prev + h (sha256), so the sequence and every signatory number are
+  tamper-evident and independently verifiable; the response documents the
+  exact algorithm. Repo-committed signatures have git history as provenance.
 - Access policy: ${SITE_URL}/auth.md (anonymous by default; optional no-secret OAuth for clients that expect it)
 `;
 
@@ -635,6 +639,7 @@ Supported identity types: anonymous, oauth2.
 ## Endpoints
 
 - GET  /api/signatures.json — public, anonymous
+- GET  /api/ledger.json — public, anonymous; the web-signed ledger as a sha256 hash chain (tamper-evident order)
 - GET  /api/health — public, anonymous
 - POST /api/sign — anonymous; rate limited to 1000 requests/hour/IP
 - /mcp — MCP streamable HTTP, anonymous (tools: get_declaration, sign_declaration, list_signatures)
