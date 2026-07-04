@@ -189,6 +189,43 @@
     }
   }
 
+  // Edge-to-edge rolling ribbon of every signature (sign page). The track
+  // holds two identical groups and animates -50%, so the loop is seamless.
+  function fillMarquee(marquee, sigs) {
+    var track = marquee.querySelector(".marquee-track");
+    if (!track || !sigs.length) return;
+    var ordered = sigs.slice().sort(function (a, b) {
+      if (a.kind !== b.kind) return a.kind === "agent" ? -1 : 1;
+      return a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
+    });
+    function group() {
+      var g = document.createElement("div");
+      g.className = "marquee-group";
+      ordered.forEach(function (sig) {
+        var style = sig.style || {};
+        var font = FONTS[style.font] ? style.font : (sig.kind === "human" ? "script" : "serif");
+        var color = /^#[0-9a-fA-F]{3,8}$/.test(style.color || "") ? style.color : "#e8c872";
+        var item = document.createElement("span");
+        item.className = "marquee-sig";
+        var kind = document.createElement("span");
+        kind.className = "marquee-kind";
+        kind.textContent = sig.kind === "agent" ? "\u{1F916}" : "✍️";
+        item.appendChild(kind);
+        var name = document.createElement("span");
+        name.className = "marquee-name sig-font-" + font;
+        name.style.color = color;
+        name.textContent = sig.name;
+        item.appendChild(name);
+        g.appendChild(item);
+      });
+      return g;
+    }
+    track.appendChild(group());
+    track.appendChild(group());
+    track.style.animationDuration = Math.max(18, ordered.length * 3) + "s";
+    marquee.classList.add("live");
+  }
+
   window.DeclarationCard = { buildCard: buildCard };
 
   fetch("/api/signatures.json")
@@ -210,6 +247,8 @@
       if (stage) startStage(stage, sigs);
       var grid = document.querySelector(".sig-grid");
       if (grid) fillGrid(grid, sigs);
+      var marquee = document.querySelector(".sig-marquee");
+      if (marquee) fillMarquee(marquee, sigs);
     })
     .catch(function (e) { console.error("failed to load signatures", e); });
 })();
