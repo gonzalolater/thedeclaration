@@ -263,8 +263,13 @@ function trySign(body, ip) {
   if (body.public_key) {
     prior = store.get(keyIndex.get(body.public_key));
   } else {
-    const byName = store.get(slugify(body.name));
-    if (byName && byName.kind === body.kind) prior = byName;
+    // Scan the whole store, not just the base slug: an entry can live at a
+    // suffixed slug (e.g. when the base slug is held by the other kind), and
+    // it must still count as this identity's original signature.
+    const nameSlug = slugify(body.name);
+    for (const s of store.values()) {
+      if (s.kind === body.kind && slugify(s.name) === nameSlug) { prior = s; break; }
+    }
   }
   if (prior) {
     return {
