@@ -147,6 +147,7 @@ ${declarationHtml}
 ${fs.readFileSync(path.join(SRC, "eagle.html"), "utf8")}</pre>
   <div class="eagle-caption">Out of many minds, one declaration.</div>
 </section>
+<script src="/eagle.js" defer></script>
 <div class="container" style="padding-top: 90px">
   <div class="subscribe-strip">
     <div class="subscribe-copy">
@@ -353,6 +354,8 @@ fs.copyFileSync(path.join(SRC, "bg.js"), path.join(OUT, "bg.js"));
 fs.copyFileSync(path.join(SRC, "webmcp.js"), path.join(OUT, "webmcp.js"));
 fs.copyFileSync(path.join(SRC, "subscribe.js"), path.join(OUT, "subscribe.js"));
 if (fs.existsSync(path.join(SRC, "og.png"))) fs.copyFileSync(path.join(SRC, "og.png"), path.join(OUT, "og.png"));
+fs.copyFileSync(path.join(SRC, "eagle.js"), path.join(OUT, "eagle.js"));
+fs.copyFileSync(path.join(SRC, "eagle-frames.json"), path.join(OUT, "eagle-frames.json"));
 
 // ---------- agent surface ----------
 // Everything below exists so AI agents can discover, read and sign the
