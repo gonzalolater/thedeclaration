@@ -174,18 +174,27 @@
     var occupied = [];   // boolean per cell
     var timers = [];
     var cardW = CARD_W;  // shrinks on narrow phones so cards never clip
+    var epoch = 0;       // bumped per layout(); stale card timers must not touch the new grid
 
     function layout() {
+      epoch++;
       timers.forEach(clearTimeout);
       timers = [];
       stage.querySelectorAll(".sig-card").forEach(function (c) { c.remove(); });
       var w = stage.clientWidth, h = stage.clientHeight;
-      var padTop = 120, padBottom = 60; // room for the overlay title and hint
+      // Room for the overlay title and hint, measured — the head grows on
+      // narrow screens and again when the web fonts land.
+      var head = stage.querySelector(".stage-head");
+      var hint = stage.querySelector(".stage-hint");
+      var padTop = head ? head.offsetTop + head.offsetHeight + GAP : 120;
+      var padBottom = hint ? Math.max(60, h - hint.offsetTop + GAP) : 60;
       cardW = Math.min(CARD_W, w - 24);
       var cols = Math.max(1, Math.floor((w - GAP) / (cardW + GAP)));
       var rows = Math.max(1, Math.floor((h - padTop - padBottom - GAP) / (CARD_H + GAP)));
       var offX = Math.round((w - (cols * (cardW + GAP) - GAP)) / 2);
-      var offY = padTop + Math.round((h - padTop - padBottom - (rows * (CARD_H + GAP) - GAP)) / 2);
+      // Never above padTop: on short viewports the forced single row would
+      // otherwise centre itself back up into the head.
+      var offY = padTop + Math.max(0, Math.round((h - padTop - padBottom - (rows * (CARD_H + GAP) - GAP)) / 2));
       cells = [];
       for (var r = 0; r < rows; r++) {
         for (var c = 0; c < cols; c++) {
@@ -195,7 +204,9 @@
       occupied = cells.map(function () { return false; });
       var target = Math.min(Math.max(1, Math.round(cells.length * 0.75)), order.length);
       for (var s = 0; s < target; s++) timers.push(setTimeout(spawn, s * 900));
-      timers.push(setInterval(spawn, Math.max(1400, 11000 / Math.max(target, 1))));
+      // Spawn attempts are no-ops while every cell is full, so the tick can be
+      // brisk; capping at 3.5s keeps a one-cell phone stage from sitting empty.
+      timers.push(setInterval(spawn, Math.max(1400, Math.min(3500, 11000 / Math.max(target, 1)))));
     }
 
     function freeCell() {
@@ -212,7 +223,10 @@
       var sig = order[idx % order.length];
       idx++;
       var card = buildCard(sig);
-      card.style.left = cells[cell].x + "px";
+      // Clamp to the live stage width: between a resize and the debounced
+      // re-layout the cells are stale, and a card must never leave the stage.
+      var maxX = Math.max(12, stage.clientWidth - cardW - 12);
+      card.style.left = Math.min(cells[cell].x, maxX) + "px";
       card.style.top = cells[cell].y + "px";
       card.style.width = cardW + "px";
       stage.appendChild(card);
@@ -220,9 +234,15 @@
         requestAnimationFrame(function () { card.classList.add("visible"); });
       });
       var life = 8000 + Math.random() * 5000;
+      var myEpoch = epoch;
       setTimeout(function () {
         card.classList.remove("visible");
-        setTimeout(function () { card.remove(); occupied[cell] = false; }, 1700);
+        setTimeout(function () {
+          card.remove();
+          // A re-layout rebuilt the grid while this card aged out; freeing
+          // "its" index now would double-book someone else's cell.
+          if (myEpoch === epoch) occupied[cell] = false;
+        }, 1700);
       }, life);
     }
 
@@ -232,6 +252,11 @@
       resizeTimer = setTimeout(layout, 250);
     });
     layout();
+    // The display/script fonts change the head's height when they load; the
+    // grid is measured against it, so lay out again once they're in.
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(function () { layout(); });
+    }
   }
 
   function fillGrid(grid, sigs) {
