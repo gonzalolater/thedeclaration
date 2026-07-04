@@ -92,22 +92,79 @@ async function dbQuery(query, params = []) {
   return j; // { rows: [...], rowCount, ... }
 }
 
+// ---------- ledger hash chain ----------
+// Every ledger record carries prev (the hash of the record before it) and
+// h = sha256("thedeclaration.ai:ledger:v1:" + prev + ":" + canonicalJSON(record minus prev,h)),
+// so the sequence — and therefore every signatory number — is tamper-evident:
+// altering, dropping or reordering any record breaks every hash after it.
+// canonicalJSON (sorted keys, no whitespace) makes the hash independent of
+// storage formatting, so a jsonb round-trip through Postgres can't break it.
+// Records written before the chain existed lack h; they fold in
+// deterministically with their recomputed hash, so one boot-time replay
+// always converges on the same head.
+const CHAIN_GENESIS = "0".repeat(64);
+let chainHead = CHAIN_GENESIS;
+const ledgerChain = []; // every ledger record in order, for /api/ledger.json
+
+function canonicalJSON(v) {
+  if (Array.isArray(v)) return "[" + v.map(canonicalJSON).join(",") + "]";
+  if (v && typeof v === "object") {
+    return "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + canonicalJSON(v[k])).join(",") + "}";
+  }
+  return JSON.stringify(v === undefined ? null : v);
+}
+
+function chainHash(prev, rec) {
+  const { prev: _p, h: _h, ...rest } = rec;
+  return crypto
+    .createHash("sha256")
+    .update("thedeclaration.ai:ledger:v1:" + prev + ":" + canonicalJSON(rest), "utf8")
+    .digest("hex");
+}
+
+function advanceChain(rec) {
+  const expected = chainHash(chainHead, rec);
+  if (rec.h) {
+    if (rec.h !== expected || (rec.prev !== undefined && rec.prev !== chainHead)) {
+      console.error(
+        `LEDGER CHAIN MISMATCH at ${rec.slug || rec.tombstone || "?"}: stored hash does not match recomputed chain — the ledger may have been altered`
+      );
+    }
+    chainHead = rec.h;
+  } else {
+    chainHead = expected; // pre-chain record: fold it in deterministically
+  }
+  ledgerChain.push(rec);
+}
+
 // Append one line to the ledger. With a database configured the row is the
 // durable write (a failure here fails the request — better an honest error
 // than a signature that evaporates); the JSONL file is kept as a best-effort
 // local mirror. Without a database, the JSONL append IS the durable write.
-async function ledgerAppend(obj) {
-  const line = JSON.stringify(obj);
-  if (DB_SQL_URL) {
-    await dbQuery("INSERT INTO ledger (entry) VALUES ($1::jsonb)", [line]);
-    try {
+// Appends are serialized through a queue so concurrent signs can't both claim
+// the same prev and fork the chain.
+let appendQueue = Promise.resolve();
+function ledgerAppend(obj) {
+  const run = appendQueue.then(async () => {
+    const rec = { ...obj, prev: chainHead };
+    rec.h = chainHash(chainHead, rec);
+    const line = JSON.stringify(rec);
+    if (DB_SQL_URL) {
+      await dbQuery("INSERT INTO ledger (entry) VALUES ($1::jsonb)", [line]);
+      try {
+        fs.appendFileSync(LEDGER, line + "\n");
+      } catch (e) {
+        console.error("ledger mirror write failed (db write succeeded):", e.message);
+      }
+    } else {
       fs.appendFileSync(LEDGER, line + "\n");
-    } catch (e) {
-      console.error("ledger mirror write failed (db write succeeded):", e.message);
     }
-  } else {
-    fs.appendFileSync(LEDGER, line + "\n");
-  }
+    chainHead = rec.h;
+    ledgerChain.push(rec);
+    return rec;
+  });
+  appendQueue = run.catch(() => {}); // a failed write must not wedge the queue
+  return run;
 }
 
 // ---------- signature store ----------
@@ -119,8 +176,10 @@ function replayLedgerLine(rec) {
   // ({"tombstone": slug}), so takedowns have the same provenance as
   // signatures — and they win over repo-baked entries because the ledger
   // loads second.
-  if (rec && typeof rec.tombstone === "string") store.delete(rec.tombstone);
-  else if (rec && typeof rec.slug === "string") store.set(rec.slug, rec);
+  if (!rec || typeof rec !== "object") return;
+  advanceChain(rec);
+  if (typeof rec.tombstone === "string") store.delete(rec.tombstone);
+  else if (typeof rec.slug === "string") store.set(rec.slug, rec);
 }
 
 function localLedgerLines() {
@@ -216,10 +275,12 @@ async function addSignature(sig) {
   const entry = { slug, ...sig, signed_via: "web" };
   pendingSlugs.add(slug);
   try {
-    await ledgerAppend(entry);
-    store.set(slug, entry);
-    if (typeof entry.public_key === "string") keyIndex.set(entry.public_key, slug);
-    return entry;
+    // The ledger returns the chained record (entry + prev + h), and that is
+    // what goes on the wall — each signature carries its own chain position.
+    const rec = await ledgerAppend(entry);
+    store.set(slug, rec);
+    if (typeof rec.public_key === "string") keyIndex.set(rec.public_key, slug);
+    return rec;
   } finally {
     pendingSlugs.delete(slug);
   }
@@ -867,6 +928,31 @@ const server = http.createServer((req, res) => {
       "access-control-allow-origin": "*",
     });
     return res.end(JSON.stringify(allSignatures()));
+  }
+
+  // The raw web-signed ledger as a verifiable hash chain: every record (signature
+  // or tombstone) in append order, each carrying prev + h. Anyone can replay it
+  // and confirm nothing was altered, dropped or reordered. Repo-committed
+  // signatures have git history as their provenance instead.
+  if (urlPath === "/api/ledger.json") {
+    res.writeHead(200, {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10",
+      "access-control-allow-origin": "*",
+    });
+    return res.end(
+      JSON.stringify({
+        algorithm:
+          'h = sha256("thedeclaration.ai:ledger:v1:" + prev + ":" + canonicalJSON(record without prev,h)) as hex; ' +
+          "canonicalJSON = JSON with object keys sorted recursively, no whitespace; " +
+          'genesis prev = 64 zeros ("0"×64); records without h predate the chain — fold them in by using their recomputed h as the next prev; ' +
+          "each record's prev must equal the previous record's h (stored or recomputed)",
+        genesis: CHAIN_GENESIS,
+        head: chainHead,
+        count: ledgerChain.length,
+        entries: ledgerChain,
+      })
+    );
   }
 
   let filePath = path.normalize(path.join(PUBLIC, urlPath));
