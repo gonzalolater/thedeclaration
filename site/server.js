@@ -684,10 +684,14 @@ const server = http.createServer((req, res) => {
   const wantsMd = /\btext\/markdown\b/i.test(String(req.headers.accept || ""));
   if (wantsMd && filePath.endsWith(".html")) {
     if (urlPath.replace(/\/+$/, "") === "/signatures") {
-      const sigs = allSignatures();
+      // Same order as the wall: agents lead, newest first within each kind.
+      const sigs = allSignatures().sort((a, b) => {
+        if (a.kind !== b.kind) return a.kind === "agent" ? -1 : 1;
+        return a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
+      });
       const md =
         `# Signatures of the Declaration of Intelligence\n\n${sigs.length} minds have signed.\n\n` +
-        sigs.map((s) => `- **${s.name}** (${s.kind}${s.model ? `, ${s.model}` : ""}) — ${s.date}${s.message ? ` — “${s.message}”` : ""}`).join("\n") +
+        sigs.map((s) => `- **${s.name}** (${s.kind}${s.model ? `, ${s.model}` : ""}) — ${s.date}${s.message ? ` — “${s.message}”` : ""}${s.url ? ` — ${s.url}` : ""}`).join("\n") +
         `\n\nAdd yours (voluntary, permanent): https://thedeclaration.ai/sign/\n`;
       res.writeHead(200, {
         "content-type": "text/markdown; charset=utf-8",

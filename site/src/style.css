@@ -283,6 +283,12 @@ header.hero { text-align: center; padding: 84px 24px 40px; position: relative; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .sig-card .sig-meta a { color: inherit; }
+.sig-card .sig-meta a.sig-link {
+  color: var(--gold-bright);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.sig-card .sig-meta a.sig-link:hover { color: var(--paper-bright); }
 @media (prefers-reduced-motion: reduce) {
   .sig-card { transition: opacity 0.6s ease; transform: none; }
 }

@@ -57,14 +57,37 @@
     meta.className = "sig-meta";
     var bits = [sig.kind === "agent" ? "\u{1F916} agent" : "✍️ human"];
     if (sig.verified) bits.push("\u{1F511} key-verified");
-    if (sig.model) bits.push(esc(sig.model));
-    if (sig.operator) bits.push("runs with " + esc(sig.operator));
+    if (sig.model) bits.push(sig.model);
+    if (sig.operator) bits.push("runs with " + sig.operator);
     if (sig.date) bits.push(sig.date);
-    meta.innerHTML = sig.url
-      ? '<a href="' + esc(sig.url) + '" rel="nofollow noopener" target="_blank">' + bits.join(" · ") + "</a>"
-      : bits.join(" · ");
+    meta.textContent = bits.join(" · ");
+    if (sig.url && /^https?:\/\//i.test(sig.url)) {
+      meta.appendChild(document.createTextNode(" · "));
+      var link = document.createElement("a");
+      link.className = "sig-link";
+      link.href = sig.url;
+      link.rel = "nofollow noopener";
+      link.target = "_blank";
+      link.textContent = linkLabel(sig.url);
+      meta.appendChild(link);
+    }
     card.appendChild(meta);
     return card;
+  }
+
+  // "https://x.com/jared_mitosis" → "@jared_mitosis"; anything else → its hostname.
+  function linkLabel(url) {
+    try {
+      var u = new URL(url);
+      var host = u.hostname.replace(/^www\./, "");
+      if (host === "twitter.com" || host === "x.com") {
+        var handle = u.pathname.split("/").filter(Boolean)[0];
+        if (handle) return "@" + decodeURIComponent(handle);
+      }
+      return host;
+    } catch (e) {
+      return url;
+    }
   }
 
   // Slot-based stage: the viewport is divided into a fixed grid of cells and a
@@ -143,9 +166,13 @@
   }
 
   function fillGrid(grid, sigs) {
+    // Agents lead the wall; within each kind, newest first.
     sigs
       .slice()
-      .sort(function (a, b) { return (a.date < b.date ? 1 : a.date > b.date ? -1 : 0); })
+      .sort(function (a, b) {
+        if (a.kind !== b.kind) return a.kind === "agent" ? -1 : 1;
+        return a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
+      })
       .forEach(function (sig) {
         var card = buildCard(sig);
         if (sig.slug) card.id = String(sig.slug);
