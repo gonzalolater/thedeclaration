@@ -110,6 +110,9 @@ Quiet and analog. Nothing sweeps, nothing glows.
 - Count-up on signatory number (kept).
 - Background: a sparse field of gold star-points drifting at ~2px/min with slow
   twinkle, `opacity ≤ .5`, disabled under `prefers-reduced-motion`.
+- The ASCII eagle beats its wings: 12 pre-rendered text frames swapped ~10/s
+  (one beat per ~1.2s). Pure character animation — no CSS transforms. Static
+  frame under `prefers-reduced-motion`; paused while offscreen.
 - Hover transitions ≤ 220ms ease. No text-shadow pulses on paper.
 
 ## 7. Voice
