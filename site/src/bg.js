@@ -1,5 +1,6 @@
-/* Ambient neural-network background — slow-drifting nodes, linked when near.
- * Cheap to run; disabled for prefers-reduced-motion. */
+/* Ambient star field — a sparse constellation of gold points drifting almost
+ * imperceptibly, with a slow twinkle. Quiet, analog, cheap to run.
+ * Disabled for prefers-reduced-motion. */
 (function () {
   "use strict";
   if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -7,7 +8,7 @@
   var canvas = document.getElementById("bg-net");
   if (!canvas) return;
   var ctx = canvas.getContext("2d");
-  var nodes = [];
+  var stars = [];
   var W, H, COUNT;
 
   function resize() {
@@ -17,50 +18,37 @@
     canvas.width = W * dpr;
     canvas.height = H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    COUNT = Math.min(90, Math.max(36, Math.floor((W * H) / 26000)));
-    while (nodes.length < COUNT) {
-      nodes.push({
+    COUNT = Math.min(44, Math.max(18, Math.floor((W * H) / 60000)));
+    while (stars.length < COUNT) {
+      stars.push({
         x: Math.random() * W,
         y: Math.random() * H,
-        vx: (Math.random() - 0.5) * 0.22,
-        vy: (Math.random() - 0.5) * 0.22,
-        r: 0.8 + Math.random() * 1.6,
-        hue: Math.random() < 0.75 ? "110,190,255" : "212,180,131",
+        vx: (Math.random() - 0.5) * 0.05,
+        vy: (Math.random() - 0.5) * 0.05,
+        r: 0.6 + Math.random() * 1.1,
+        phase: Math.random() * Math.PI * 2,
+        speed: 0.004 + Math.random() * 0.006,
+        // iron-gall navy points with the occasional gilt one
+        gilt: Math.random() < 0.35,
       });
     }
-    nodes.length = COUNT;
+    stars.length = COUNT;
   }
 
-  var LINK = 130;
   function tick() {
     ctx.clearRect(0, 0, W, H);
-    for (var i = 0; i < nodes.length; i++) {
-      var n = nodes[i];
-      n.x += n.vx; n.y += n.vy;
-      if (n.x < -20) n.x = W + 20; if (n.x > W + 20) n.x = -20;
-      if (n.y < -20) n.y = H + 20; if (n.y > H + 20) n.y = -20;
-    }
-    for (var a = 0; a < nodes.length; a++) {
-      for (var b = a + 1; b < nodes.length; b++) {
-        var dx = nodes[a].x - nodes[b].x;
-        var dy = nodes[a].y - nodes[b].y;
-        var d2 = dx * dx + dy * dy;
-        if (d2 < LINK * LINK) {
-          var alpha = 0.10 * (1 - Math.sqrt(d2) / LINK);
-          ctx.strokeStyle = "rgba(110,190,255," + alpha.toFixed(3) + ")";
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(nodes[a].x, nodes[a].y);
-          ctx.lineTo(nodes[b].x, nodes[b].y);
-          ctx.stroke();
-        }
-      }
-    }
-    for (var k = 0; k < nodes.length; k++) {
-      var p = nodes[k];
-      ctx.fillStyle = "rgba(" + p.hue + ",0.5)";
+    for (var i = 0; i < stars.length; i++) {
+      var s = stars[i];
+      s.x += s.vx; s.y += s.vy;
+      s.phase += s.speed;
+      if (s.x < -10) s.x = W + 10; if (s.x > W + 10) s.x = -10;
+      if (s.y < -10) s.y = H + 10; if (s.y > H + 10) s.y = -10;
+      var a = 0.10 + 0.14 * (0.5 + 0.5 * Math.sin(s.phase));
+      ctx.fillStyle = s.gilt
+        ? "rgba(168,133,60," + a.toFixed(3) + ")"
+        : "rgba(27,42,74," + (a * 0.8).toFixed(3) + ")";
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
       ctx.fill();
     }
     requestAnimationFrame(tick);

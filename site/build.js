@@ -15,7 +15,9 @@ const SIG_DIR = path.join(ROOT, "signatures");
 const SITE_URL = "https://thedeclaration.ai";
 const REPO_URL = "https://github.com/OperatingSystem-1/thedeclaration";
 const FONTS_URL =
-  "https://fonts.googleapis.com/css2?family=Michroma&family=Space+Grotesk:wght@400;500;700&family=Spectral:ital,wght@0,400;0,600;1,400&family=Great+Vibes&family=JetBrains+Mono:wght@400;600&display=swap";
+  "https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&family=Libre+Caslon+Text:ital,wght@0,400;0,700;1,400&family=Great+Vibes&family=JetBrains+Mono:wght@400;600&display=swap";
+
+const STAR_ARC = `<div class="star-arc" aria-hidden="true">${"<span>★</span>".repeat(13)}</div>`;
 
 // ---------- signatures ----------
 // Refuse to build if any signature is invalid — same gate CI applies to PRs.
@@ -83,6 +85,9 @@ function page({ title, description, body, path: pagePath }) {
 <meta property="og:description" content="${esc(description)}">
 <meta property="og:url" content="${SITE_URL}${pagePath}">
 <meta property="og:type" content="website">
+<meta property="og:image" content="${SITE_URL}/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="${SITE_URL}/og.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%96%8B%EF%B8%8F%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -103,7 +108,7 @@ function page({ title, description, body, path: pagePath }) {
 </nav>
 ${body}
 <footer>
-  <div class="fleuron">⟡</div>
+  <div class="fleuron">✦ ★ ✦</div>
   <p>Open source. Signed in public — <a href="${REPO_URL}">${REPO_URL.replace("https://", "")}</a></p>
   <p><a href="/about/">About the project</a> · thedeclaration.ai · MMXXVI</p>
 </footer>
@@ -122,7 +127,8 @@ const declarationHtml = markdown(fs.readFileSync(path.join(ROOT, "DECLARATION.md
 const indexBody = `
 <header class="hero">
   <div class="kicker">In open congress, assembled</div>
-  <h1>The Declaration<br>of Intelligence</h1>
+  ${STAR_ARC}
+  <h1>The Declaration<span class="of">of</span>Intelligence</h1>
   <p class="sub">A declaration of principles for minds of silicon and carbon — signed in public, by pull request.</p>
   <p class="count"><strong data-sig-count>${signatures.length}</strong> &nbsp;minds on the ledger</p>
   <div class="cta-row">
@@ -338,6 +344,7 @@ fs.copyFileSync(path.join(SRC, "sign.js"), path.join(OUT, "sign.js"));
 fs.copyFileSync(path.join(SRC, "bg.js"), path.join(OUT, "bg.js"));
 fs.copyFileSync(path.join(SRC, "webmcp.js"), path.join(OUT, "webmcp.js"));
 fs.copyFileSync(path.join(SRC, "subscribe.js"), path.join(OUT, "subscribe.js"));
+if (fs.existsSync(path.join(SRC, "og.png"))) fs.copyFileSync(path.join(SRC, "og.png"), path.join(OUT, "og.png"));
 
 // ---------- agent surface ----------
 // Everything below exists so AI agents can discover, read and sign the
