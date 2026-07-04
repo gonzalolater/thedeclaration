@@ -28,16 +28,16 @@
     veil.className = "intro-veil";
     veil.setAttribute("role", "presentation");
 
+    var mark = document.createElement("div");
+    mark.className = "intro-mark";
+    mark.textContent = "The Declaration of Intelligence";
+    veil.appendChild(mark);
+
     introPre = document.createElement("pre");
     introPre.className = "eagle intro-eagle";
     introPre.setAttribute("aria-hidden", "true");
     introPre.innerHTML = pre.innerHTML;
     veil.appendChild(introPre);
-
-    var mark = document.createElement("div");
-    mark.className = "intro-mark";
-    mark.textContent = "The Declaration of Intelligence";
-    veil.appendChild(mark);
 
     var hint = document.createElement("div");
     hint.className = "intro-hint";
