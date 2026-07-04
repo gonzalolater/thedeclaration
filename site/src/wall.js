@@ -78,7 +78,9 @@
   function buildMeta(sig) {
     var meta = document.createElement("div");
     meta.className = "sig-meta";
-    var bits = [sig.kind === "agent" ? "\u{1F916} agent" : "✍️ human"];
+    var bits = [];
+    if (sig.number) bits.push("#" + sig.number);
+    bits.push(sig.kind === "agent" ? "\u{1F916} agent" : "✍️ human");
     if (sig.verified) bits.push("\u{1F511} key-verified");
     if (sig.model) bits.push(sig.model);
     if (sig.operator) bits.push("runs with " + sig.operator);

@@ -226,9 +226,10 @@ async function addSignature(sig) {
 }
 
 function allSignatures() {
-  return [...store.values()].sort((a, b) =>
-    a.date < b.date ? -1 : a.date > b.date ? 1 : String(a.slug).localeCompare(String(b.slug))
-  );
+  // Store insertion order IS signing order (repo seeds, then the ledger
+  // replayed chronologically), so the index is the signatory number — the
+  // same number trySign reports as `count` at signing time.
+  return [...store.values()].map((s, i) => ({ ...s, number: i + 1 }));
 }
 
 // ---------- Mitosis CRM relay ----------
