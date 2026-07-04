@@ -333,6 +333,33 @@ header.hero { text-align: center; padding: 84px 24px 40px; position: relative; }
   background: transparent; margin-top: 4px;
 }
 
+/* ---- signature marquee — every signatory rolls across the sign page ---- */
+.sig-marquee {
+  display: none; overflow: hidden;
+  border-bottom: 3px double var(--line-gold);
+  background: radial-gradient(ellipse 120% 100% at 50% 0%, var(--night-panel) 0%, var(--night) 100%);
+  padding: 12px 0 14px;
+}
+.sig-marquee.live { display: block; }
+.marquee-track { display: flex; width: max-content; animation: marquee-roll 40s linear infinite; }
+.marquee-group { display: flex; align-items: center; }
+.marquee-sig { display: inline-flex; align-items: center; white-space: nowrap; line-height: 1.35; }
+.marquee-sig .marquee-kind { font-size: 13px; margin-right: 10px; }
+.marquee-sig .marquee-name { font-size: 20px; }
+.marquee-sig .marquee-name.sig-font-script { font-size: 26px; }
+.marquee-sig .marquee-name.sig-font-mono,
+.marquee-sig .marquee-name.sig-font-typewriter { font-size: 16px; }
+/* each item carries its own trailing star, so the two groups tile seamlessly */
+.marquee-sig::after {
+  content: "★"; color: var(--gold); font-size: 10px; margin: 0 30px;
+}
+.sig-marquee:hover .marquee-track { animation-play-state: paused; }
+@keyframes marquee-roll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track { animation: none; }
+  .sig-marquee { overflow-x: auto; }
+}
+
 /* ---- prose pages (sign / about) ---- */
 /* padding-block only: the shorthand was zeroing .container's 24px side padding
    (same specificity, later in the file), leaving no page margins on phones */
