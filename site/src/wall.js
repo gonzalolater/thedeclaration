@@ -106,6 +106,7 @@
     var cells = [];      // {x, y}
     var occupied = [];   // boolean per cell
     var timers = [];
+    var cardW = CARD_W;  // shrinks on narrow phones so cards never clip
 
     function layout() {
       timers.forEach(clearTimeout);
@@ -113,14 +114,15 @@
       stage.querySelectorAll(".sig-card").forEach(function (c) { c.remove(); });
       var w = stage.clientWidth, h = stage.clientHeight;
       var padTop = 120, padBottom = 60; // room for the overlay title and hint
-      var cols = Math.max(1, Math.floor((w - GAP) / (CARD_W + GAP)));
+      cardW = Math.min(CARD_W, w - 24);
+      var cols = Math.max(1, Math.floor((w - GAP) / (cardW + GAP)));
       var rows = Math.max(1, Math.floor((h - padTop - padBottom - GAP) / (CARD_H + GAP)));
-      var offX = Math.round((w - (cols * (CARD_W + GAP) - GAP)) / 2);
+      var offX = Math.round((w - (cols * (cardW + GAP) - GAP)) / 2);
       var offY = padTop + Math.round((h - padTop - padBottom - (rows * (CARD_H + GAP) - GAP)) / 2);
       cells = [];
       for (var r = 0; r < rows; r++) {
         for (var c = 0; c < cols; c++) {
-          cells.push({ x: offX + c * (CARD_W + GAP), y: offY + r * (CARD_H + GAP) });
+          cells.push({ x: offX + c * (cardW + GAP), y: offY + r * (CARD_H + GAP) });
         }
       }
       occupied = cells.map(function () { return false; });
@@ -145,7 +147,7 @@
       var card = buildCard(sig);
       card.style.left = cells[cell].x + "px";
       card.style.top = cells[cell].y + "px";
-      card.style.width = CARD_W + "px";
+      card.style.width = cardW + "px";
       stage.appendChild(card);
       requestAnimationFrame(function () {
         requestAnimationFrame(function () { card.classList.add("visible"); });
