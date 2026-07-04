@@ -329,7 +329,9 @@ header.hero { text-align: center; padding: 84px 24px 40px; position: relative; }
 }
 
 /* ---- prose pages (sign / about) ---- */
-.prose { padding: 44px 0 90px; }
+/* padding-block only: the shorthand was zeroing .container's 24px side padding
+   (same specificity, later in the file), leaving no page margins on phones */
+.prose { padding-top: 44px; padding-bottom: 90px; }
 .prose h1 {
   font-family: var(--display); font-weight: 400; font-size: clamp(34px, 4.6vw, 46px);
   margin: 26px 0 14px; color: var(--ink); line-height: 1.15;
