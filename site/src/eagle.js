@@ -13,8 +13,8 @@
   if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
   var FRAME_MS = 100;     // 12 frames -> one wing beat every ~1.2s
-  var INTRO_HOLD = 3000;  // veil dwell before the curtain lifts
-  var INTRO_LIFT = 900;   // curtain transition, must match CSS
+  var INTRO_HOLD = 1500;  // veil dwell before the curtain lifts on its own
+  var INTRO_LIFT = 700;   // curtain transition, must match CSS
 
   // ---- intro veil (once per session) ----
   var introPre = null;
@@ -46,7 +46,7 @@
 
     var hint = document.createElement("div");
     hint.className = "intro-hint";
-    hint.textContent = "Click to enter";
+    hint.innerHTML = 'Scroll to reveal<span class="chevron">&#9662;</span>';
     veil.appendChild(hint);
 
     document.body.appendChild(veil);
@@ -65,7 +65,9 @@
     };
     setTimeout(lift, INTRO_HOLD);
     veil.addEventListener("click", lift);
-    document.addEventListener("keydown", lift, { once: false });
+    document.addEventListener("keydown", lift);
+    window.addEventListener("wheel", lift, { passive: true });
+    window.addEventListener("touchmove", lift, { passive: true });
   }
 
   // ---- shared wing-beat loop ----
