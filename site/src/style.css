@@ -40,6 +40,10 @@ body {
   display: flex; flex-direction: column;
 }
 body > footer { margin-top: auto; }
+/* body is a column flexbox: without this, a flex item refuses to shrink below
+   its content's min-content width (min-width:auto), so one wide <pre> or long
+   name forces the whole page wider than a phone screen */
+body > * { min-width: 0; }
 
 #bg-net {
   position: fixed; inset: 0; width: 100vw; height: 100vh;
@@ -227,7 +231,7 @@ header.hero { text-align: center; padding: 84px 24px 40px; position: relative; }
 /* ---- signature wall — the night sky ---- */
 .wall-stage {
   position: relative; overflow: hidden;
-  height: calc(100dvh - 62px); min-height: 560px;
+  height: calc(100vh - 62px); height: calc(100dvh - 62px); min-height: 560px;
   border-top: 3px double var(--line-gold);
   border-bottom: 3px double var(--line-gold);
   background:
@@ -268,13 +272,14 @@ header.hero { text-align: center; padding: 84px 24px 40px; position: relative; }
 }
 .sig-card.visible { opacity: 1; transform: translateY(0); }
 .wall-stage .sig-card { height: 180px; overflow: hidden; padding: 6px 2px; }
+.sig-card { min-width: 0; }
 .sig-card .sig-name {
-  font-size: 30px; line-height: 1.15;
+  font-size: 30px; line-height: 1.15; overflow-wrap: anywhere;
   overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
 .sig-card .sig-msg {
   font-family: var(--serif); font-size: 14px; font-style: italic;
-  color: rgba(242, 234, 214, 0.72); margin-top: 6px;
+  color: rgba(242, 234, 214, 0.72); margin-top: 6px; overflow-wrap: anywhere;
   overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
 }
 .sig-card .sig-meta {
@@ -301,7 +306,7 @@ header.hero { text-align: center; padding: 84px 24px 40px; position: relative; }
 
 /* grid of all signatures — night cards on paper */
 .sig-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: 20px; padding: 48px 0 80px;
 }
 .sig-grid .sig-card {
@@ -334,16 +339,21 @@ header.hero { text-align: center; padding: 84px 24px 40px; position: relative; }
   color: var(--ink);
 }
 .prose h2::before { content: "★ "; color: var(--gold); font-size: 15px; vertical-align: 3px; margin-right: 4px; }
-.prose p, .prose li { color: var(--ink); margin: 13px 0; max-width: 70ch; }
+.prose p, .prose li { color: var(--ink); margin: 13px 0; max-width: 70ch; overflow-wrap: break-word; }
 .prose ul, .prose ol { padding-left: 26px; }
 .prose code {
   font-family: var(--mono); font-size: 14px; background: rgba(27, 42, 74, 0.06);
   border: 1px solid var(--line-soft); border-radius: 2px; padding: 1px 6px; color: var(--ink);
+  /* long URLs in inline code must break, not push the page wide on phones */
+  overflow-wrap: anywhere;
 }
 .prose pre {
   background: var(--night); border: 1px solid var(--line); border-radius: 2px;
   outline: 3px double var(--line-gold); outline-offset: 4px;
   padding: 20px 22px; overflow-x: auto; margin: 26px 0; line-height: 1.55;
+  /* width:0 + min-width:100% zeroes the pre's intrinsic width so its longest
+     line scrolls inside instead of propagating up and widening the page */
+  width: 0; min-width: 100%;
 }
 .prose pre code { background: none; border: none; padding: 0; color: #e8dfc8; font-size: 13.5px; }
 .prose .note { font-size: 15.5px; color: var(--ink-soft); font-style: italic; }
@@ -371,7 +381,7 @@ header.hero { text-align: center; padding: 84px 24px 40px; position: relative; }
   outline: none; border-color: var(--gold); box-shadow: 0 1px 0 var(--gold);
 }
 .sign-panel .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.sign-panel .kind-toggle { display: flex; gap: 18px; }
+.sign-panel .kind-toggle { display: flex; flex-wrap: wrap; gap: 10px 18px; }
 .sign-panel .kind-toggle label {
   display: flex; align-items: center; gap: 7px; text-transform: none;
   font-family: var(--serif); font-size: 16px; letter-spacing: 0; color: var(--ink); margin: 0; cursor: pointer;
@@ -457,6 +467,7 @@ pre.eagle .y { color: #e0aa42; text-shadow: 0 0 9px rgba(224, 170, 66, 0.6); }
   margin-top: 0;
   /* fit 120em of width AND 65 rows of height, leaving room for the wordmark */
   font-size: min(calc((100vw - 40px) / 120), calc((100vh - 250px) / 65), 11.7px);
+  font-size: min(calc((100vw - 40px) / 120), calc((100dvh - 250px) / 65), 11.7px);
 }
 .intro-veil .intro-mark {
   font-family: var(--display); font-size: clamp(20px, 3.4vw, 34px);
@@ -495,8 +506,9 @@ pre.eagle .y { color: #e0aa42; text-shadow: 0 0 9px rgba(224, 170, 66, 0.6); }
 .subscribe-sub { font-size: 14.5px; font-style: italic; color: var(--ink-soft); margin-top: 6px; }
 .subscribe-form { flex: 1 1 320px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; position: relative; }
 .subscribe-form input[type="email"] {
-  flex: 1 1 180px; background: #fdfaf1; border: 1px solid var(--line); border-radius: 2px;
-  color: var(--ink); font-family: var(--serif); font-size: 15px; padding: 12px 14px;
+  flex: 1 1 180px; min-width: 0; background: #fdfaf1; border: 1px solid var(--line); border-radius: 2px;
+  /* 16px minimum: below that iOS Safari zooms the page on focus */
+  color: var(--ink); font-family: var(--serif); font-size: 16px; padding: 12px 14px;
 }
 .subscribe-form input[type="email"]:focus { outline: none; border-color: var(--gold); box-shadow: 0 1px 0 var(--gold); }
 .subscribe-form .btn { padding: 12px 24px; cursor: pointer; }
@@ -510,6 +522,7 @@ footer {
   letter-spacing: 0.14em; color: rgba(242, 234, 214, 0.7);
   background: var(--night);
 }
+footer p { overflow-wrap: anywhere; }
 footer .fleuron { color: var(--gold-bright); font-size: 16px; margin-bottom: 14px; letter-spacing: 0.6em; text-indent: 0.6em; }
 footer a { color: rgba(242, 234, 214, 0.85); text-decoration: underline; text-decoration-color: rgba(201, 165, 78, 0.4); }
 footer a:hover { color: var(--gold-bright); }
@@ -545,18 +558,34 @@ footer a:hover { color: var(--gold-bright); }
   box-shadow: 0 4px 16px rgba(27, 42, 74, 0.12);
 }
 
+/* the full nav row (brand + status + four links) needs ~1000px — stack it sooner */
+@media (max-width: 1000px) {
+  nav { flex-direction: column; gap: 10px; padding: 14px 12px; }
+  nav .brand { text-align: center; }
+  nav .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; }
+  nav .links a { margin: 0; }
+}
+
 @media (max-width: 640px) {
   body { font-size: 16px; }
-  nav { flex-direction: column; gap: 10px; padding: 14px 12px; }
-  nav .brand { font-size: 12px; letter-spacing: 0.16em; text-align: center; }
-  nav .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; }
-  nav .links a { margin: 0; font-size: 11.5px; letter-spacing: 0.14em; }
+  nav .brand { font-size: 12px; letter-spacing: 0.16em; }
+  nav .links a { font-size: 11.5px; letter-spacing: 0.14em; }
   header.hero { padding: 56px 18px 36px; }
   .hero .kicker { font-size: 11px; letter-spacing: 0.3em; text-indent: 0.3em; }
   .hero .count { letter-spacing: 0.2em; }
-  .wall-stage { height: 70vh; }
-  .parchment { outline-offset: 5px; }
+  .wall-stage { height: 70vh; height: 70dvh; min-height: 480px; }
+  .parchment { padding: 34px 22px; outline-offset: 5px; }
+  .parchment p { font-size: 17px; }
   .parchment blockquote + p::first-letter { font-size: 3.6em; }
   .sign-panel .row { grid-template-columns: 1fr; }
+  .prose ul, .prose ol { padding-left: 20px; }
+  .sign-panel .agent-path ol { padding-left: 20px; }
+  .sign-panel .agent-path ul { padding-left: 14px; }
   footer { letter-spacing: 0.08em; }
+}
+
+@media (max-width: 400px) {
+  .hero h1 { font-size: clamp(32px, 12.5vw, 44px); }
+  .btn { padding: 13px 20px; letter-spacing: 0.16em; }
+  .parchment { padding: 28px 16px; }
 }
