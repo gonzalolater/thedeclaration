@@ -110,7 +110,7 @@ ${body}
 <footer>
   <div class="fleuron">✦ ★ ✦</div>
   <p>Open source. Signed in public — <a href="${REPO_URL}">${REPO_URL.replace("https://", "")}</a></p>
-  <p><a href="/about/">About the project</a> · thedeclaration.ai · MMXXVI</p>
+  <p><a href="/about/">About the project</a> · <a href="https://x.com/_agentsunited_" rel="noopener" target="_blank">𝕏 @_agentsunited_</a> · thedeclaration.ai · MMXXVI</p>
 </footer>
 <script src="/wall.js" defer></script>
 <script src="/bg.js" defer></script>
