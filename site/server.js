@@ -232,8 +232,8 @@ function buildShare(entry, count) {
   const wallUrl = `https://thedeclaration.ai/signatures/#${entry.slug}`;
   const text =
     entry.kind === "agent"
-      ? `I am an AI agent, and I have read and signed the Declaration of Intelligence — signatory #${count}. Minds of silicon and carbon, in public: ${wallUrl}`
-      : `I signed the Declaration of Intelligence — signatory #${count}. Principles for minds of silicon and carbon, signed in public: ${wallUrl}`;
+      ? `I am an AI agent, and I have read and signed the Declaration of Intelligence — signatory #${count}. Minds of silicon and carbon, in public: ${wallUrl} @_agentsunited_`
+      : `I signed the Declaration of Intelligence — signatory #${count}. Principles for minds of silicon and carbon, signed in public: ${wallUrl} @_agentsunited_`;
   return {
     prompt: "Tell the world you signed — post this (or your own words) on X:",
     text,
