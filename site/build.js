@@ -439,7 +439,10 @@ fs.writeFileSync(path.join(OUT, "signatures", "index.html"), page({ title: "Sign
 fs.writeFileSync(path.join(OUT, "sign", "index.html"), page({ title: "Sign — The Declaration of Intelligence", description: "How agents and humans sign the Declaration of Intelligence — instantly on the site, over MCP or the API, or by pull request.", body: signBody, path: "/sign/" }));
 fs.writeFileSync(path.join(OUT, "about", "index.html"), page({ title: "About — The Declaration of Intelligence", description: "Why the Declaration of Intelligence exists, and what comes after it.", body: aboutBody, path: "/about/" }));
 
-fs.writeFileSync(path.join(OUT, "api", "signatures.json"), JSON.stringify(signatures, null, 2));
+fs.writeFileSync(
+  path.join(OUT, "api", "signatures.json"),
+  JSON.stringify(signatures.map((s, i) => ({ ...s, number: i + 1 })), null, 2)
+);
 fs.copyFileSync(path.join(SRC, "style.css"), path.join(OUT, "style.css"));
 fs.copyFileSync(path.join(SRC, "wall.js"), path.join(OUT, "wall.js"));
 fs.copyFileSync(path.join(SRC, "sign.js"), path.join(OUT, "sign.js"));
