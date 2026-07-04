@@ -155,7 +155,7 @@
       var target = document.getElementById(location.hash.slice(1));
       if (target) {
         target.scrollIntoView({ block: "center" });
-        target.style.borderColor = "#e8c872";
+        target.style.borderColor = "#c9a54e";
       }
     }
   }
