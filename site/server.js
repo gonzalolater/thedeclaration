@@ -5,13 +5,19 @@
 // - POST /api/sign: validates with the same rules as CI, appends to the
 //   ledger, and the signature is on the wall immediately.
 //
-// Storage: append-only JSONL at $DATA_DIR/signatures.jsonl (a Fly volume in
-// prod). Signatures committed to the repo (the PR path) are baked into the
-// image and merged in at boot, so both signing paths land on one wall.
+// Storage: an append-only ledger. With DATABASE_URL set (Neon Postgres), the
+// ledger is the `ledger` table — the durable source of truth — and the local
+// JSONL at $DATA_DIR/signatures.jsonl is kept as a best-effort mirror. Without
+// DATABASE_URL, the JSONL file IS the ledger (local dev, CI). On first boot
+// against an empty database, an existing JSONL ledger is migrated in, so
+// flipping the secret on promotes the volume's history into Postgres.
+// Signatures committed to the repo (the PR path) are baked into the image and
+// merged in at boot, so all signing paths land on one wall.
 //
 // Env:
-//   PORT       listen port (default 8080)
-//   DATA_DIR   ledger directory (default /data)
+//   PORT          listen port (default 8080)
+//   DATA_DIR      ledger directory (default /data)
+//   DATABASE_URL  Neon Postgres connection string; enables database persistence
 
 const http = require("http");
 const https = require("https");
@@ -53,11 +59,74 @@ const LINK_HEADER = [
   '</llms.txt>; rel="describedby"; type="text/plain"',
 ].join(", ");
 
+// ---------- database (Neon Postgres over HTTP) ----------
+// Zero dependencies: Neon exposes SQL over HTTPS (the same data plane the
+// @neondatabase/serverless driver uses), so plain fetch is a full client.
+// One table mirrors the JSONL ledger exactly — each row is one ledger line
+// (a signature entry or a tombstone), replayed in insertion order at boot.
+const DATABASE_URL = process.env.DATABASE_URL || "";
+let DB_SQL_URL = "";
+if (DATABASE_URL) {
+  try {
+    DB_SQL_URL = `https://${new URL(DATABASE_URL).hostname}/sql`;
+  } catch (e) {
+    console.error("invalid DATABASE_URL — refusing to start with broken persistence:", e.message);
+    process.exit(1);
+  }
+}
+
+async function dbQuery(query, params = []) {
+  const r = await fetch(DB_SQL_URL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "neon-connection-string": DATABASE_URL,
+    },
+    body: JSON.stringify({ query, params }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(`db ${r.status}: ${(j && (j.message || j.error)) || "query failed"}`);
+  return j; // { rows: [...], rowCount, ... }
+}
+
+// Append one line to the ledger. With a database configured the row is the
+// durable write (a failure here fails the request — better an honest error
+// than a signature that evaporates); the JSONL file is kept as a best-effort
+// local mirror. Without a database, the JSONL append IS the durable write.
+async function ledgerAppend(obj) {
+  const line = JSON.stringify(obj);
+  if (DB_SQL_URL) {
+    await dbQuery("INSERT INTO ledger (entry) VALUES ($1::jsonb)", [line]);
+    try {
+      fs.appendFileSync(LEDGER, line + "\n");
+    } catch (e) {
+      console.error("ledger mirror write failed (db write succeeded):", e.message);
+    }
+  } else {
+    fs.appendFileSync(LEDGER, line + "\n");
+  }
+}
+
 // ---------- signature store ----------
 const store = new Map(); // slug -> signature (with slug field)
 const keyIndex = new Map(); // public_key -> slug (identity index for keyed signers)
 
-function loadStore() {
+function replayLedgerLine(rec) {
+  // The ledger is append-only: a moderation removal is itself a ledger line
+  // ({"tombstone": slug}), so takedowns have the same provenance as
+  // signatures — and they win over repo-baked entries because the ledger
+  // loads second.
+  if (rec && typeof rec.tombstone === "string") store.delete(rec.tombstone);
+  else if (rec && typeof rec.slug === "string") store.set(rec.slug, rec);
+}
+
+function localLedgerLines() {
+  if (!fs.existsSync(LEDGER)) return [];
+  return fs.readFileSync(LEDGER, "utf8").split("\n").filter((l) => l.trim());
+}
+
+async function loadStore() {
   // 1) signatures merged into the repo (PR path), baked into the image
   for (const f of fs.readdirSync(REPO_SIGS)) {
     if (!f.endsWith(".json") || f === "signature.schema.json") continue;
@@ -70,18 +139,40 @@ function loadStore() {
       console.error(`skipping ${f}: ${e.message}`);
     }
   }
-  // 2) the web-signed ledger on the volume. The ledger is append-only:
-  //    a moderation removal is itself a ledger line ({"tombstone": slug}),
-  //    so takedowns have the same provenance as signatures — and they win
-  //    over repo-baked entries because the ledger loads second.
+  // 2) the web-signed ledger: the database when configured, else the JSONL
+  //    file on the volume.
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (fs.existsSync(LEDGER)) {
-    for (const line of fs.readFileSync(LEDGER, "utf8").split("\n")) {
-      if (!line.trim()) continue;
+  if (DB_SQL_URL) {
+    await dbQuery(
+      "CREATE TABLE IF NOT EXISTS ledger (id bigserial PRIMARY KEY, entry jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now())"
+    );
+    // One-time migration: an empty table + a non-empty local ledger means the
+    // database was just provisioned — promote the volume's history into it.
+    const count = Number((await dbQuery("SELECT count(*)::int AS n FROM ledger")).rows[0].n);
+    if (count === 0) {
+      const lines = localLedgerLines();
+      for (const line of lines) {
+        try {
+          JSON.parse(line); // never migrate a corrupt line
+          await dbQuery("INSERT INTO ledger (entry) VALUES ($1::jsonb)", [line]);
+        } catch (e) {
+          console.error(`skipping migration of ledger line: ${e.message}`);
+        }
+      }
+      if (lines.length) console.log(`migrated ${lines.length} ledger line(s) into the database`);
+    }
+    const res = await dbQuery("SELECT entry::text AS entry FROM ledger ORDER BY id");
+    for (const row of res.rows) {
       try {
-        const rec = JSON.parse(line);
-        if (rec && typeof rec.tombstone === "string") store.delete(rec.tombstone);
-        else if (rec && typeof rec.slug === "string") store.set(rec.slug, rec);
+        replayLedgerLine(JSON.parse(row.entry));
+      } catch (e) {
+        console.error(`skipping db ledger row: ${e.message}`);
+      }
+    }
+  } else {
+    for (const line of localLedgerLines()) {
+      try {
+        replayLedgerLine(JSON.parse(line));
       } catch (e) {
         console.error(`skipping ledger line: ${e.message}`);
       }
@@ -90,7 +181,7 @@ function loadStore() {
   for (const [slug, sig] of store) {
     if (typeof sig.public_key === "string") keyIndex.set(sig.public_key, slug);
   }
-  console.log(`loaded ${store.size} signature(s)`);
+  console.log(`loaded ${store.size} signature(s)${DB_SQL_URL ? " (ledger: database)" : " (ledger: file)"}`);
 }
 
 function slugify(name) {
@@ -99,15 +190,27 @@ function slugify(name) {
   return s || "signatory";
 }
 
-function addSignature(sig) {
+// Slugs mid-flight to the ledger: the database write awaits, and two
+// concurrent signers must not be handed the same slug inside that gap.
+const pendingSlugs = new Set();
+function slugTaken(slug) {
+  return store.has(slug) || pendingSlugs.has(slug);
+}
+
+async function addSignature(sig) {
   let slug = slugify(sig.name);
-  if (store.has(slug)) slug = `${slug}-${crypto.randomBytes(2).toString("hex")}`;
-  if (store.has(slug) || !SLUG_RE.test(slug)) slug = `signatory-${crypto.randomBytes(4).toString("hex")}`;
+  if (slugTaken(slug)) slug = `${slug}-${crypto.randomBytes(2).toString("hex")}`;
+  if (slugTaken(slug) || !SLUG_RE.test(slug)) slug = `signatory-${crypto.randomBytes(4).toString("hex")}`;
   const entry = { slug, ...sig, signed_via: "web" };
-  fs.appendFileSync(LEDGER, JSON.stringify(entry) + "\n");
-  store.set(slug, entry);
-  if (typeof entry.public_key === "string") keyIndex.set(entry.public_key, slug);
-  return entry;
+  pendingSlugs.add(slug);
+  try {
+    await ledgerAppend(entry);
+    store.set(slug, entry);
+    if (typeof entry.public_key === "string") keyIndex.set(entry.public_key, slug);
+    return entry;
+  } finally {
+    pendingSlugs.delete(slug);
+  }
 }
 
 function allSignatures() {
@@ -244,7 +347,7 @@ function buildShare(entry, count) {
 
 // Validates and records a signature. Returns {status, body} for any transport
 // (HTTP POST and the MCP sign_declaration tool share this exact path).
-function trySign(body, ip) {
+async function trySign(body, ip) {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { status: 400, body: { ok: false, errors: ["body must be a JSON object"], usage: SIGN_USAGE } };
   }
@@ -297,7 +400,7 @@ function trySign(body, ip) {
     return { status: 429, body: { ok: false, errors: ["rate limit exceeded — try again in an hour"] } };
   }
   if (body.public_key) body.verified = true; // proof already checked by validation
-  const entry = addSignature(body);
+  const entry = await addSignature(body);
   recordHit(ip); // only a signature that reached the ledger consumes quota
   relayEmailToCrm(email, "thedeclaration-sign");
   track("declaration_signed", entry.slug, {
@@ -316,13 +419,13 @@ function clientIp(req) {
 
 function handleSign(req, res) {
   if (crossOrigin(req)) return sendJSON(res, 403, { ok: false, errors: ["cross-origin submissions are not accepted"] });
-  readBody(req, res, (raw) => {
+  readBody(req, res, async (raw) => {
     let body;
     try { body = JSON.parse(raw); } catch {
       return sendJSON(res, 400, { ok: false, errors: ["body must be valid JSON"], usage: SIGN_USAGE });
     }
     try {
-      const r = trySign(body, clientIp(req));
+      const r = await trySign(body, clientIp(req));
       return sendJSON(res, r.status, r.body);
     } catch (e) {
       console.error("sign failed:", e.message);
@@ -374,7 +477,7 @@ function handleModerate(req, res) {
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
     return sendJSON(res, 401, { ok: false, errors: ["invalid moderation token"] });
   }
-  readBody(req, res, (raw) => {
+  readBody(req, res, async (raw) => {
     let body;
     try { body = JSON.parse(raw); } catch {
       return sendJSON(res, 400, { ok: false, errors: ["body must be valid JSON"] });
@@ -388,7 +491,7 @@ function handleModerate(req, res) {
       date: new Date().toISOString(),
     };
     try {
-      fs.appendFileSync(LEDGER, JSON.stringify(tomb) + "\n");
+      await ledgerAppend(tomb);
     } catch (e) {
       console.error("tombstone write failed:", e.message);
       return sendJSON(res, 500, { ok: false, errors: ["could not record the removal"] });
@@ -535,7 +638,7 @@ function mcpToolText(obj) {
   return { content: [{ type: "text", text: JSON.stringify(obj, null, 2) }], structuredContent: obj };
 }
 
-function mcpCallTool(name, args, ip) {
+async function mcpCallTool(name, args, ip) {
   args = args && typeof args === "object" ? args : {};
   if (name === "get_declaration") {
     const md = fs.readFileSync(path.join(PUBLIC, "index.md"), "utf8");
@@ -548,7 +651,7 @@ function mcpCallTool(name, args, ip) {
     return mcpToolText({ total, signatures: sigs });
   }
   if (name === "sign_declaration") {
-    const r = trySign({ ...args }, ip);
+    const r = await trySign({ ...args }, ip);
     if (!r.body.ok) return { ...mcpToolText(r.body), isError: true };
     if (r.body.duplicate) return mcpToolText(r.body); // already signed — the note explains
     return mcpToolText({
@@ -573,7 +676,7 @@ function handleMcp(req, res) {
   if (req.method !== "POST") return sendJSON(res, 405, { ok: false, errors: ["use POST"] });
   if (crossOrigin(req)) return sendJSON(res, 403, { ok: false, errors: ["cross-origin requests are not accepted"] });
 
-  readBody(req, res, (raw) => {
+  readBody(req, res, async (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch {
       return sendJSON(res, 400, { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
@@ -607,7 +710,7 @@ function handleMcp(req, res) {
         case "tools/list":
           return reply({ result: { tools: MCP_TOOLS } });
         case "tools/call": {
-          const result = mcpCallTool(params.name, params.arguments, clientIp(req));
+          const result = await mcpCallTool(params.name, params.arguments, clientIp(req));
           if (!result) return reply({ error: { code: -32602, message: `Unknown tool: ${params.name}` } });
           return reply({ result });
         }
@@ -817,8 +920,18 @@ function dropPrivileges() {
 }
 
 dropPrivileges();
-loadStore();
-loadRate();
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`thedeclaration.ai listening on http://localhost:${PORT} (ledger: ${LEDGER})`);
-});
+loadStore()
+  .then(() => {
+    loadRate();
+    server.listen(PORT, "0.0.0.0", () => {
+      console.log(
+        `thedeclaration.ai listening on http://localhost:${PORT} (ledger: ${DB_SQL_URL ? "database + " : ""}${LEDGER})`
+      );
+    });
+  })
+  .catch((e) => {
+    // A boot that can't reach its ledger must not serve: crashing hands the
+    // restart to the platform instead of silently running without history.
+    console.error("failed to load the signature store:", e.message);
+    process.exit(1);
+  });
