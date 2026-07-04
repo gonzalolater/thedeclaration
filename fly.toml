@@ -4,9 +4,9 @@ primary_region = "sjc"
 
 [build]
 
-[mounts]
-  source = "data"
-  destination = "/data"
+# No volume: the ledger and rate-limit state live in Neon Postgres
+# (DATABASE_URL secret); /data on the ephemeral rootfs holds only a
+# debug mirror rebuilt from the database at boot.
 
 [http_service]
   internal_port = 8080

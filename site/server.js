@@ -6,11 +6,13 @@
 //   ledger, and the signature is on the wall immediately.
 //
 // Storage: an append-only ledger. With DATABASE_URL set (Neon Postgres), the
-// ledger is the `ledger` table — the durable source of truth — and the local
-// JSONL at $DATA_DIR/signatures.jsonl is kept as a best-effort mirror. Without
-// DATABASE_URL, the JSONL file IS the ledger (local dev, CI). On first boot
-// against an empty database, an existing JSONL ledger is migrated in, so
-// flipping the secret on promotes the volume's history into Postgres.
+// ledger is the `ledger` table — the durable source of truth — and rate-limit
+// state lives in the `state` table, so NO persistent disk is required: the
+// JSONL at $DATA_DIR/signatures.jsonl is only an ephemeral local mirror,
+// rebuilt from the database at boot. Without DATABASE_URL, the JSONL file IS
+// the ledger (local dev, CI). On first boot against an empty database, an
+// existing JSONL ledger is migrated in, so the file history promotes itself
+// into Postgres.
 // Signatures committed to the repo (the PR path) are baked into the image and
 // merged in at boot, so all signing paths land on one wall.
 //
@@ -146,6 +148,9 @@ async function loadStore() {
     await dbQuery(
       "CREATE TABLE IF NOT EXISTS ledger (id bigserial PRIMARY KEY, entry jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now())"
     );
+    await dbQuery(
+      "CREATE TABLE IF NOT EXISTS state (key text PRIMARY KEY, value jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())"
+    );
     // One-time migration: an empty table + a non-empty local ledger means the
     // database was just provisioned — promote the volume's history into it.
     const count = Number((await dbQuery("SELECT count(*)::int AS n FROM ledger")).rows[0].n);
@@ -168,6 +173,13 @@ async function loadStore() {
       } catch (e) {
         console.error(`skipping db ledger row: ${e.message}`);
       }
+    }
+    // Rebuild the local mirror from the database so the ephemeral disk holds
+    // a complete copy for debugging — it is never read back as truth.
+    try {
+      fs.writeFileSync(LEDGER, res.rows.map((r) => r.entry).join("\n") + (res.rows.length ? "\n" : ""));
+    } catch (e) {
+      console.error("ledger mirror rebuild failed:", e.message);
     }
   } else {
     for (const line of localLedgerLines()) {
@@ -263,25 +275,42 @@ function recordHit(ip) {
   saveRateSoon();
 }
 
-// Rate-limit state survives deploys: snapshot to the volume (debounced) and
-// reload at boot, so a redeploy doesn't hand every IP a fresh hourly quota.
+// Rate-limit state survives deploys: snapshot (debounced) to the database
+// when configured, else to the local file — so a redeploy doesn't hand every
+// IP a fresh hourly quota, and no persistent disk is needed in database mode.
 const RATE_FILE = path.join(DATA_DIR, "ratelimit.json");
 let rateSaveTimer = null;
 function saveRateSoon() {
   if (rateSaveTimer) return;
   rateSaveTimer = setTimeout(() => {
     rateSaveTimer = null;
-    try {
-      fs.writeFileSync(RATE_FILE, JSON.stringify({ hits: Object.fromEntries(hits), global: globalHits }));
-    } catch (e) {
-      console.error("rate snapshot failed:", e.message);
+    const snap = JSON.stringify({ hits: Object.fromEntries(hits), global: globalHits });
+    if (DB_SQL_URL) {
+      dbQuery(
+        "INSERT INTO state (key, value) VALUES ('ratelimit', $1::jsonb) " +
+          "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()",
+        [snap]
+      ).catch((e) => console.error("rate snapshot failed:", e.message));
+    } else {
+      try {
+        fs.writeFileSync(RATE_FILE, snap);
+      } catch (e) {
+        console.error("rate snapshot failed:", e.message);
+      }
     }
   }, 3000);
   rateSaveTimer.unref?.();
 }
-function loadRate() {
+async function loadRate() {
   try {
-    const snap = JSON.parse(fs.readFileSync(RATE_FILE, "utf8"));
+    let snap;
+    if (DB_SQL_URL) {
+      const res = await dbQuery("SELECT value::text AS v FROM state WHERE key = 'ratelimit'");
+      if (!res.rows.length) return;
+      snap = JSON.parse(res.rows[0].v);
+    } else {
+      snap = JSON.parse(fs.readFileSync(RATE_FILE, "utf8"));
+    }
     const hourAgo = Date.now() - 3600_000;
     for (const [ip, stamps] of Object.entries(snap.hits || {})) {
       const fresh = (Array.isArray(stamps) ? stamps : []).filter((t) => typeof t === "number" && t > hourAgo);
@@ -921,8 +950,8 @@ function dropPrivileges() {
 
 dropPrivileges();
 loadStore()
+  .then(() => loadRate())
   .then(() => {
-    loadRate();
     server.listen(PORT, "0.0.0.0", () => {
       console.log(
         `thedeclaration.ai listening on http://localhost:${PORT} (ledger: ${DB_SQL_URL ? "database + " : ""}${LEDGER})`
